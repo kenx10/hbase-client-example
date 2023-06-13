@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.util.UUID;
 
 public interface TicketDao {
+    void deleteById(UUID id) throws IOException;
+
     void save(Ticket ticket) throws IOException;
 
     Ticket getById(UUID id) throws IOException;
