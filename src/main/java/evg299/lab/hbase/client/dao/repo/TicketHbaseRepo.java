@@ -6,6 +6,7 @@ import evg299.lab.hbase.client.dao.tables.TicketTable;
 import evg299.lab.hbase.client.dto.Ticket;
 import evg299.lab.hbase.client.util.CommonUtil;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hbase.CompareOperator;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,6 +77,30 @@ public class TicketHbaseRepo extends TicketTable implements TicketDao {
         }
     }
 
+    @Override
+    public Ticket reject(UUID id, UUID rejectId, OffsetDateTime rejectDateTime, String rejectReason) throws IOException {
+        try (Table table = connection.getTable(TableName.valueOf(TABLE_NAME))) {
+            Get get = new Get(CommonUtil.uuidToBytes(id));
+            Result result = table.get(get);
+            if (result.isEmpty())
+                return null;
+
+            byte[] ticketRaw = result.getValue(MAIN_COLUMN_FAMILY, SRC_COLUMN);
+            Ticket ticket = mapper.readValue(CommonUtil.bytesToString(ticketRaw), Ticket.class);
+            ticket.setRejectUuid(rejectId);
+            ticket.setRejectDateTime(rejectDateTime);
+            ticket.setRejectReason(rejectReason);
+
+            Put put = new Put(CommonUtil.uuidToBytes(ticket.getUuid()));
+            put.addColumn(IDX_COLUMN_FAMILY, REJECTED_COLUMN, CommonUtil.booleanToBytes(ticket.isRejected()));
+            put.addColumn(MAIN_COLUMN_FAMILY, SRC_COLUMN, CommonUtil.stringToBytes(mapper.writeValueAsString(ticket)));
+
+            table.put(put);
+
+            return ticket;
+        }
+    }
+
     public List<Ticket> search(String ownerId, LocalDate from) throws IOException {
         try (Table table = connection.getTable(TableName.valueOf(TABLE_NAME))) {
             List<Ticket> tickets = new ArrayList<>();
@@ -84,14 +110,17 @@ public class TicketHbaseRepo extends TicketTable implements TicketDao {
             scan.addFamily(MAIN_COLUMN_FAMILY);
 
             FilterList filters = new FilterList();
-            filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, OWNER_COLUMN,
-                    CompareOperator.EQUAL, CommonUtil.stringToBytes(ownerId)));
+            if (!StringUtils.isEmpty(ownerId)) {
+                filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, OWNER_COLUMN,
+                        CompareOperator.EQUAL, CommonUtil.stringToBytes(ownerId)));
+            }
 
-            filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, DT_COLUMN,
-                    CompareOperator.GREATER_OR_EQUAL, CommonUtil.offsetDateTimeToBytes(from.atTime(LocalTime.MIDNIGHT).atOffset(ZoneOffset.UTC))));
+            if (null != from) {
+                filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, DT_COLUMN,
+                        CompareOperator.GREATER_OR_EQUAL, CommonUtil.offsetDateTimeToBytes(from.atTime(LocalTime.MIDNIGHT).atOffset(ZoneOffset.UTC))));
+            }
 
             scan.setFilter(filters);
-
             scan.setMaxResultSize(1000);
 
             for (Result result : table.getScanner(scan)) {
