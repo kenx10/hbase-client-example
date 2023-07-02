@@ -7,9 +7,11 @@ import evg299.lab.hbase.client.dto.Ticket;
 import evg299.lab.hbase.client.util.CommonUtil;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hadoop.hbase.CompareOperator;
+import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.hadoop.hbase.filter.FilterList;
 import org.apache.hadoop.hbase.filter.SingleColumnValueFilter;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -32,12 +34,12 @@ public class TicketHbaseRepo extends TicketTable implements TicketDao {
 
     public void createTable() throws IOException {
         try (Admin admin = connection.getAdmin()) {
-            TableDescriptor descriptor = TableDescriptorBuilder.newBuilder(TableName.valueOf(TABLE_NAME))
-                    .setColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(IDX_COLUMN_FAMILY).build())
-                    .setColumnFamily(ColumnFamilyDescriptorBuilder.newBuilder(MAIN_COLUMN_FAMILY).build())
-                    .build();
-
-            admin.createTable(descriptor);
+            if (!admin.tableExists(TableName.valueOf(TABLE_NAME))) {
+                HTableDescriptor descriptor = new HTableDescriptor(TableName.valueOf(TABLE_NAME));
+                descriptor.addFamily(new HColumnDescriptor(IDX_COLUMN_FAMILY));
+                descriptor.addFamily(new HColumnDescriptor(MAIN_COLUMN_FAMILY));
+                admin.createTable(descriptor);
+            }
         }
     }
 
@@ -112,12 +114,12 @@ public class TicketHbaseRepo extends TicketTable implements TicketDao {
             FilterList filters = new FilterList();
             if (!StringUtils.isEmpty(ownerId)) {
                 filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, OWNER_COLUMN,
-                        CompareOperator.EQUAL, CommonUtil.stringToBytes(ownerId)));
+                        CompareFilter.CompareOp.EQUAL, CommonUtil.stringToBytes(ownerId)));
             }
 
             if (null != from) {
                 filters.addFilter(new SingleColumnValueFilter(IDX_COLUMN_FAMILY, DT_COLUMN,
-                        CompareOperator.GREATER_OR_EQUAL, CommonUtil.offsetDateTimeToBytes(from.atTime(LocalTime.MIDNIGHT).atOffset(ZoneOffset.UTC))));
+                        CompareFilter.CompareOp.GREATER_OR_EQUAL, CommonUtil.offsetDateTimeToBytes(from.atTime(LocalTime.MIDNIGHT).atOffset(ZoneOffset.UTC))));
             }
 
             scan.setFilter(filters);
